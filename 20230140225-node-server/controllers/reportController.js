@@ -3,33 +3,36 @@ const { Op } = require("sequelize");
 
 exports.getDailyReport = async (req, res) => {
   try {
-    const { nama, tanggal } = req.query; 
-    let options = { where: {} };
+    const { nama, startDate, endDate } = req.query;
 
-   
+    let options = {
+      where: {},
+    };
+
+    // Filter Nama
     if (nama) {
       options.where.nama = {
         [Op.like]: `%${nama}%`,
       };
     }
 
- 
-    if (tanggal) {
-      const startOfDay = new Date(tanggal);
-      startOfDay.setHours(0, 0, 0, 0);
-      const endOfDay = new Date(tanggal);
-      endOfDay.setHours(23, 59, 59, 999);
+    // Filter Tanggal (checkIn, bukan createdAt)
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
 
-      options.where.createdAt = {
-        [Op.between]: [startOfDay, endOfDay],
+      const end = new Date(endDate);
+      end.setHours(23, 59, 59, 999);
+
+      options.where.checkIn = {
+        [Op.between]: [start, end],
       };
     }
 
-    
     const records = await Presensi.findAll(options);
 
     res.json({
-      reportDate: new Date().toLocaleDateString("id-ID"),
+      message: "Laporan presensi berhasil diambil",
       data: records,
     });
   } catch (error) {
