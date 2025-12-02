@@ -1,15 +1,29 @@
-// Di controllers/presensiControllers.js
+// controllers/presensiControllers.js
 
 const { Presensi } = require("../models");
 const { format } = require("date-fns-tz");
+
+// Tentukan TimeZone secara konstan
 const timeZone = "Asia/Jakarta";
 
-// 1. UBAH DARI 'exports.CheckIn' MENJADI 'exports.checkIn'
-exports.checkIn = async (req, res) => { 
+// --- FUNGSI CHECK-IN (Dengan Lokasi) ---
+exports.checkIn = async (req, res) => {
     try {
+        // Ambil userId dan nama dari JWT payload (req.user)
         const { id: userId, nama: userName } = req.user;
+        
+        // Ambil data lokasi dari body request (dari frontend)
+        const { latitude, longitude } = req.body;
         const waktuSekarang = new Date();
 
+        // Validasi Lokasi
+        if (!latitude || !longitude) {
+            return res
+                .status(400)
+                .json({ message: "Latitude dan Longitude wajib diisi untuk Check-In." });
+        }
+
+        // Cek apakah ada catatan check-in aktif hari ini (checkOut: null)
         const existingRecord = await Presensi.findOne({
             where: { userId: userId, checkOut: null },
         });
@@ -20,17 +34,23 @@ exports.checkIn = async (req, res) => {
                 .json({ message: "Anda sudah melakukan check-in hari ini." });
         }
 
+        // Buat data Presensi baru
         const newRecord = await Presensi.create({
             userId: userId,
             nama: userName,
             checkIn: waktuSekarang,
+            // Simpan lokasi check-in
+            latitude: latitude, 
+            longitude: longitude,
         });
         
         const formattedData = {
             userId: newRecord.userId,
             nama: newRecord.nama,
             checkIn: format(newRecord.checkIn, "yyyy-MM-dd HH:mm:ssXXX", { timeZone }),
-            checkOut: null
+            checkOut: null,
+            latitude: newRecord.latitude, 
+            longitude: newRecord.longitude,
         };
 
         res.status(201).json({
@@ -38,20 +58,33 @@ exports.checkIn = async (req, res) => {
                 waktuSekarang,
                 "HH:mm:ss",
                 { timeZone }
-            )} WIB`,
+            )} WIB. Lokasi: (${latitude}, ${longitude})`,
             data: formattedData,
         });
     } catch (error) {
+        console.error("Error CheckIn:", error);
         res.status(500).json({ message: "Terjadi kesalahan pada server", error: error.message });
     }
 };
 
-// 2. UBAH DARI 'exports.CheckOut' MENJADI 'exports.checkOut'
+// --- FUNGSI CHECK-OUT (Dengan Lokasi) ---
 exports.checkOut = async (req, res) => {
     try {
+        // Ambil userId dan userName dari JWT payload (req.user)
         const { id: userId, nama: userName } = req.user;
+        
+        // Ambil data lokasi check-out dari body request
+        const { latitude, longitude } = req.body;
         const waktuSekarang = new Date();
 
+        // Validasi Lokasi
+        if (!latitude || !longitude) {
+            return res
+                .status(400)
+                .json({ message: "Latitude dan Longitude wajib diisi untuk Check-Out." });
+        }
+
+        // Cari catatan check-in yang aktif (checkOut: null)
         const recordToUpdate = await Presensi.findOne({
             where: { userId: userId, checkOut: null },
         });
@@ -62,7 +95,12 @@ exports.checkOut = async (req, res) => {
             });
         }
 
+        // Update record
         recordToUpdate.checkOut = waktuSekarang;
+        // Simpan lokasi check-out
+        recordToUpdate.latitudeOut = latitude;
+        recordToUpdate.longitudeOut = longitude;
+
         await recordToUpdate.save();
 
         const formattedData = {
@@ -70,6 +108,10 @@ exports.checkOut = async (req, res) => {
             nama: recordToUpdate.nama,
             checkIn: format(recordToUpdate.checkIn, "yyyy-MM-dd HH:mm:ssXXX", { timeZone }),
             checkOut: format(recordToUpdate.checkOut, "yyyy-MM-dd HH:mm:ssXXX", { timeZone }),
+            latitude: recordToUpdate.latitude,
+            longitude: recordToUpdate.longitude,
+            latitudeOut: recordToUpdate.latitudeOut,
+            longitudeOut: recordToUpdate.longitudeOut,
         };
 
         res.json({
@@ -77,17 +119,20 @@ exports.checkOut = async (req, res) => {
                 waktuSekarang,
                 "HH:mm:ss",
                 { timeZone }
-            )} WIB`,
+            )} WIB. Lokasi: (${latitude}, ${longitude})`,
             data: formattedData,
         });
     } catch (error) {
+        console.error("Error CheckOut:", error);
         res.status(500).json({ message: "Terjadi kesalahan pada server", error: error.message });
     }
 };
 
+// --- FUNGSI DELETE PRESENSI ---
 exports.deletePresensi = async (req, res) => {
     try {
-        const { id: userId } = req.user;
+        // ID User yang terautentikasi (JWT Payload)
+        const { id: userId } = req.user; 
         const presensiId = req.params.id;
         const recordToDelete = await Presensi.findByPk(presensiId);
 
@@ -96,39 +141,40 @@ exports.deletePresensi = async (req, res) => {
                 .status(404)
                 .json({ message: "Catatan presensi tidak ditemukan." });
         }
+        
+        // Authorization Check: Hanya pemilik yang boleh menghapus
         if (recordToDelete.userId !== userId) {
             return res
                 .status(403)
                 .json({ message: "Akses ditolak: Anda bukan pemilik catatan ini." });
         }
+        
         await recordToDelete.destroy();
         
-        // 3. KESALAHAN LOGIKA: Hanya boleh ada SATU res.send/res.json/res.status per request. 
-        // Baris res.json di bawah dihapus karena sudah ada res.status(204).send() di atasnya.
-        // res.json({ message: "Data presensi berhasil diperbarui.", data: recordToDelete, }); 
-        
-        res.status(204).send(); // Status 204 (No Content) adalah standar untuk DELETE yang berhasil.
+        res.status(204).send(); // Status 204: Berhasil, Tidak ada konten untuk dikirim
     } catch (error) {
+        console.error("Error deletePresensi:", error);
         res
             .status(500)
             .json({ message: "Terjadi kesalahan pada server", error: error.message });
     }
 };
 
+// --- FUNGSI UPDATE PRESENSI (Dengan Otorisasi) ---
 exports.updatePresensi = async (req, res) => {
     try {
+        // Ambil ID dan role user yang meminta update untuk otorisasi
+        const { id: requesterId, role: requesterRole } = req.user; 
         const presensiId = req.params.id;
-        const { checkIn, checkOut, nama } = req.body;
-        
-        // 4. Rekomendasi: Anda mungkin perlu menambahkan validasi role/hak akses di sini 
-        // jika pengguna hanya boleh mengupdate presensinya sendiri.
+        // Hanya izinkan update field yang relevan
+        const { checkIn, checkOut, nama, latitude, longitude, latitudeOut, longitudeOut } = req.body; 
 
-        if (checkIn === undefined && checkOut === undefined && nama === undefined) {
+        if (checkIn === undefined && checkOut === undefined && nama === undefined && latitude === undefined) {
             return res.status(400).json({
-                message:
-                    "Request body tidak berisi data yang valid untuk diupdate (checkIn, checkOut, atau nama).",
+                message: "Request body tidak berisi data yang valid untuk diupdate.",
             });
         }
+        
         const recordToUpdate = await Presensi.findByPk(presensiId);
         
         if (!recordToUpdate) {
@@ -136,12 +182,23 @@ exports.updatePresensi = async (req, res) => {
                 .status(404)
                 .json({ message: "Catatan presensi tidak ditemukan." });
         }
-        
-        // Perbaikan: Pastikan Anda juga menggunakan req.user.id untuk verifikasi kepemilikan
-        
-        recordToUpdate.checkIn = checkIn || recordToUpdate.checkIn;
-        recordToUpdate.checkOut = checkOut || recordToUpdate.checkOut;
-        recordToUpdate.nama = nama || recordToUpdate.nama;
+
+        // Otorisasi: Hanya pemilik catatan ATAU Admin yang boleh mengupdate
+        if (recordToUpdate.userId !== requesterId && requesterRole !== 'admin') {
+             return res
+                .status(403)
+                .json({ message: "Akses ditolak: Anda tidak memiliki hak untuk mengubah catatan ini." });
+        }
+
+        // Update field yang disediakan
+        if (checkIn !== undefined) recordToUpdate.checkIn = checkIn;
+        if (checkOut !== undefined) recordToUpdate.checkOut = checkOut;
+        if (nama !== undefined) recordToUpdate.nama = nama;
+        if (latitude !== undefined) recordToUpdate.latitude = latitude;
+        if (longitude !== undefined) recordToUpdate.longitude = longitude;
+        if (latitudeOut !== undefined) recordToUpdate.latitudeOut = latitudeOut;
+        if (longitudeOut !== undefined) recordToUpdate.longitudeOut = longitudeOut;
+
         await recordToUpdate.save();
 
         res.json({
@@ -149,6 +206,7 @@ exports.updatePresensi = async (req, res) => {
             data: recordToUpdate,
         });
     } catch (error) {
+        console.error("Error updatePresensi:", error);
         res
             .status(500)
             .json({ message: "Terjadi kesalahan pada server", error: error.message });

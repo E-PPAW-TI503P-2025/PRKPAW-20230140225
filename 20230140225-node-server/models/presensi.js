@@ -11,6 +11,7 @@ module.exports = (sequelize, DataTypes) => {
      */
     static associate(models) {
   Presensi.belongsTo(models.User, { foreignKey: 'userId', as: 'user' });
+  
 }
 
   }
