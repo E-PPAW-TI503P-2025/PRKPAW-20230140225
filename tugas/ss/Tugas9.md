@@ -8,4 +8,4 @@
 ![alt text](image-27.png)
 
 \\DATABASE TABLE PRESENSI\\
-![alt text](image-29.png)
+![alt text](image-30.png)
