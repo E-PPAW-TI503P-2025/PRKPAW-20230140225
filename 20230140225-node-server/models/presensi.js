@@ -31,7 +31,19 @@ module.exports = (sequelize, DataTypes) => {
     checkOut: {
       type: DataTypes.DATE,
       allowNull: true, // Boleh null
-    }
+    },
+    latitude: {
+      type: DataTypes.DECIMAL(10, 7),
+      allowNull: false,
+    },
+    longitude: {
+      type: DataTypes.DECIMAL(10, 7),
+      allowNull: false,
+    },
+    buktiFoto: {
+      type: DataTypes.STRING, // Simpan path atau nama file
+      allowNull: true,
+    },
   }, {
     sequelize,
     modelName: 'Presensi',

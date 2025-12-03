@@ -2,25 +2,68 @@
 
 const { Presensi } = require("../models");
 const { format } = require("date-fns-tz");
+const multer = require('multer'); // Import Multer
+const path = require('path');     // Import Path
 
 // Tentukan TimeZone secara konstan
 const timeZone = "Asia/Jakarta";
 
-// --- FUNGSI CHECK-IN (Dengan Lokasi) ---
+// =======================================================
+// === 1. KONFIGURASI MULTER UNTUK UPLOAD FOTO PRESENSI ===
+// =======================================================
+
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        // Pastikan folder 'uploads/' ada di root server Anda
+        cb(null, 'uploads/'); 
+    },
+    filename: (req, file, cb) => {
+        // Format nama file: userId-timestamp.ext
+        // Pastikan req.user.id tersedia (dari middleware JWT)
+        if (!req.user || !req.user.id) {
+            return cb(new Error('User ID tidak ditemukan untuk penamaan file!'), null);
+        }
+        const ext = path.extname(file.originalname);
+        cb(null, `${req.user.id}-${Date.now()}${ext}`);
+    }
+});
+
+const fileFilter = (req, file, cb) => {
+    // Hanya perbolehkan file yang dimulai dengan 'image/'
+    if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+    } else {
+        cb(new Error('Hanya file gambar yang diperbolehkan!'), false);
+    }
+};
+
+// Ekspor middleware Multer untuk digunakan di route
+exports.upload = multer({ storage: storage, fileFilter: fileFilter });
+
+// =======================================================
+// === 2. FUNGSI CONTROLLER (DENGAN INTEGRASI FOTO) ===
+// =======================================================
+
+// --- FUNGSI CHECK-IN (Dengan Lokasi dan Bukti Foto) ---
 exports.checkIn = async (req, res) => {
     try {
         // Ambil userId dan nama dari JWT payload (req.user)
         const { id: userId, nama: userName } = req.user;
         
-        // Ambil data lokasi dari body request (dari frontend)
+        // Ambil data lokasi dari body request
         const { latitude, longitude } = req.body;
         const waktuSekarang = new Date();
+        
+        // Dapatkan path file dari Multer (req.file)
+        // Kolom buktiFoto diasumsikan ada di model Presensi
+        const buktiFoto = req.file ? req.file.path : null; 
 
-        // Validasi Lokasi
-        if (!latitude || !longitude) {
+        // Validasi Lokasi dan Foto
+        if (!latitude || !longitude || !buktiFoto) {
+            // Jika foto wajib, berikan pesan error
             return res
                 .status(400)
-                .json({ message: "Latitude dan Longitude wajib diisi untuk Check-In." });
+                .json({ message: "Latitude, Longitude, dan Bukti Foto wajib diisi untuk Check-In." });
         }
 
         // Cek apakah ada catatan check-in aktif hari ini (checkOut: null)
@@ -39,9 +82,9 @@ exports.checkIn = async (req, res) => {
             userId: userId,
             nama: userName,
             checkIn: waktuSekarang,
-            // Simpan lokasi check-in
             latitude: latitude, 
             longitude: longitude,
+            buktiFoto: buktiFoto, // Simpan path foto
         });
         
         const formattedData = {
@@ -51,6 +94,7 @@ exports.checkIn = async (req, res) => {
             checkOut: null,
             latitude: newRecord.latitude, 
             longitude: newRecord.longitude,
+            buktiFoto: newRecord.buktiFoto 
         };
 
         res.status(201).json({
@@ -70,21 +114,16 @@ exports.checkIn = async (req, res) => {
 // --- FUNGSI CHECK-OUT (Dengan Lokasi) ---
 exports.checkOut = async (req, res) => {
     try {
-        // Ambil userId dan userName dari JWT payload (req.user)
         const { id: userId, nama: userName } = req.user;
-        
-        // Ambil data lokasi check-out dari body request
         const { latitude, longitude } = req.body;
         const waktuSekarang = new Date();
 
-        // Validasi Lokasi
         if (!latitude || !longitude) {
             return res
                 .status(400)
                 .json({ message: "Latitude dan Longitude wajib diisi untuk Check-Out." });
         }
 
-        // Cari catatan check-in yang aktif (checkOut: null)
         const recordToUpdate = await Presensi.findOne({
             where: { userId: userId, checkOut: null },
         });
@@ -95,9 +134,7 @@ exports.checkOut = async (req, res) => {
             });
         }
 
-        // Update record
         recordToUpdate.checkOut = waktuSekarang;
-        // Simpan lokasi check-out
         recordToUpdate.latitudeOut = latitude;
         recordToUpdate.longitudeOut = longitude;
 
@@ -131,7 +168,6 @@ exports.checkOut = async (req, res) => {
 // --- FUNGSI DELETE PRESENSI ---
 exports.deletePresensi = async (req, res) => {
     try {
-        // ID User yang terautentikasi (JWT Payload)
         const { id: userId } = req.user; 
         const presensiId = req.params.id;
         const recordToDelete = await Presensi.findByPk(presensiId);
@@ -142,7 +178,6 @@ exports.deletePresensi = async (req, res) => {
                 .json({ message: "Catatan presensi tidak ditemukan." });
         }
         
-        // Authorization Check: Hanya pemilik yang boleh menghapus
         if (recordToDelete.userId !== userId) {
             return res
                 .status(403)
@@ -151,7 +186,7 @@ exports.deletePresensi = async (req, res) => {
         
         await recordToDelete.destroy();
         
-        res.status(204).send(); // Status 204: Berhasil, Tidak ada konten untuk dikirim
+        res.status(204).send();
     } catch (error) {
         console.error("Error deletePresensi:", error);
         res
@@ -163,10 +198,8 @@ exports.deletePresensi = async (req, res) => {
 // --- FUNGSI UPDATE PRESENSI (Dengan Otorisasi) ---
 exports.updatePresensi = async (req, res) => {
     try {
-        // Ambil ID dan role user yang meminta update untuk otorisasi
         const { id: requesterId, role: requesterRole } = req.user; 
         const presensiId = req.params.id;
-        // Hanya izinkan update field yang relevan
         const { checkIn, checkOut, nama, latitude, longitude, latitudeOut, longitudeOut } = req.body; 
 
         if (checkIn === undefined && checkOut === undefined && nama === undefined && latitude === undefined) {
@@ -183,14 +216,12 @@ exports.updatePresensi = async (req, res) => {
                 .json({ message: "Catatan presensi tidak ditemukan." });
         }
 
-        // Otorisasi: Hanya pemilik catatan ATAU Admin yang boleh mengupdate
         if (recordToUpdate.userId !== requesterId && requesterRole !== 'admin') {
              return res
                 .status(403)
                 .json({ message: "Akses ditolak: Anda tidak memiliki hak untuk mengubah catatan ini." });
         }
 
-        // Update field yang disediakan
         if (checkIn !== undefined) recordToUpdate.checkIn = checkIn;
         if (checkOut !== undefined) recordToUpdate.checkOut = checkOut;
         if (nama !== undefined) recordToUpdate.nama = nama;
