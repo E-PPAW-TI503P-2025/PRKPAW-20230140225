@@ -3,7 +3,7 @@ Tampilan presensi dengan kamera
 
 
 Tampilan halaman report
-![alt text](image-32.png)
+![alt text](image-36.png)
 
 
 Tampilan thumbnail foto saat di klik
