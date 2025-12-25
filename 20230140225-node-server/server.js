@@ -9,6 +9,7 @@ const path = require('path');
 const presensiRoutes = require("./routes/presensi");
 const reportRoutes = require("./routes/reports");
 const authRoutes = require('./routes/auth');
+const iotRoutes = require("./routes/iot");
 
 
 // Middleware
@@ -29,6 +30,7 @@ app.use("/api/presensi", presensiRoutes);
 app.use("/api/reports", reportRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use("/api/iot", iotRoutes);
 
 
 app.listen(PORT, () => {
